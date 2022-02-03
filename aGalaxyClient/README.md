@@ -1,16 +1,17 @@
 # A10 aGalaxy client for Flowmon DDoS Defender
 
 Version: 2.8
+
 Date: Aug 5, 2020
 
 These scripts are to add interface to configure A10 aGalaxy management platform with needed information for DDoS attack mitigation Flowmon DDoS Defender must be at version 5.2.1 or higher for those scripts to work properly. 
 Also, it needs Flowmon version 11 in order to work well with aGalaxy Image 3.2.2.
 
 ## Installation
-1. Modify in the file /data/components/agalaxyclient/etc/aGalaxyConfig.pl using your favorite text editor lines 10 to 12. Your A10 aGalaxy login credentials and IP belongs there.
+1. Modify in the file ./etc/aGalaxyConfig.pl using your favorite text editor lines 10 to 12. Your A10 aGalaxy login credentials and IP belongs there.
 2. Login to DDoS Defender.
 3. Go to Configuration and there modify or create a new alert.
-4. In the alert select option to Run Script and upload here file aGalaxyMitigation.sh. Also select option Run when attack is detected and attack characteristics are collected and Run when attack is ended. This will ensure that aGalaxy box is configured and configuration is removed once attack is over. It is possible if you want to have all preconfiguration made then run test of the script while passing parameter install. This will create initial configuration and Zone template. You can use custom template with configuration and pass it as parameter to script. In template, you can use Threshold values:
+4. In the alert select option to Run Script and upload here file `aGalaxyMitigation.sh`. Also select option Run when attack is detected and attack characteristics are collected and Run when attack is ended. This will ensure that aGalaxy box is configured and configuration is removed once attack is over. It is possible if you want to have all preconfiguration made then run test of the script while passing parameter install. This will create initial configuration and Zone template. You can use custom template with configuration and pass it as parameter to script. In template, you can use Threshold values:
 	- 2110201 TCP PPS
     - 2110202 UDP PPS
     - 2110203 443 PPS
