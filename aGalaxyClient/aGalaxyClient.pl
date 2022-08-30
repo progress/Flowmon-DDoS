@@ -19,7 +19,7 @@ use Data::Dump qw(dump);
 # Added DBI module for SQLite support
 use DBI;
 use 5.010;
-use IPC::System::Simple qw(run);
+use IPC::System::Simple qw(system capture);
 
 require '/data/components/agalaxyclient/etc/aGalaxyConfig.pl';
 
@@ -127,13 +127,15 @@ else {
   # Attack signature is updated so let's update the zone as well
   elsif ($$decoded{'event'} eq 'signature_update') {
     if ($return ne 'fail') {
+      print {$fh} localtime() . " INFO: Attack ".$$decoded{'attackId'}. " updated, attack signature: ".$$decoded{'attacksignature'}."\n";
       checkDB();
       my $name = zoneName($$decoded{'segment'}, $$decoded{'attackId'});
+      $zones = getZones($name);
       my ($exist, $orig) = checkZone($name);
 
       if ($exist) {
         print {$fh} localtime() . " ERROR: The zone $name does not exist, cannot make its update.\n";
-
+        createZone($name);
       } else {
         print {$fh} localtime() . " INFO: Updating zone $name\n";
         modifyZone($name);
@@ -443,8 +445,6 @@ sub createZone {
   my $retval;
   my ($zone_name, $subnet) = @_;
 
-
-
   my @tcp_ports;
   my @udp_ports;
 #  my @icmp_type;
@@ -453,6 +453,12 @@ sub createZone {
 #  my %icmp_hash;
 
   my ($port, $protocol) = (0, 'other');
+  my $sig_len = length($$decoded{'attacksignature'});
+  if ($sig_len eq 0) {
+    # Signature is empty
+    print {$fh} localtime() . " INFO: Zone " .$zone_name. " not created, the signature is empty.\n";
+    return 0;
+  }
   # parse through the attack signature to find ports and protocol used for attack
   my @signature_piceses = split( / OR /, $$decoded{'attacksignature'} );
   foreach my $rule (@signature_piceses) {
@@ -559,11 +565,8 @@ sub createZone {
       return 0;
     }
 
-
     # Add IPs to the zone template
     $$zone_template{"ip_list"} = \@ip_list;
-    
-      print {$fh} localtime() . " DEBUG: Zone " .$zone_name. " created, the IP has these values.\n".dump($$zone_template{"ip_list"})."\n";
 
     # TODO add port under attack in case it's not listed, we should protect those in case there is nothing
 
@@ -576,33 +579,18 @@ sub createZone {
 
       # send notificatin if we are successfull
       if (get_notification()) {
-        eval {
-          run("/data/components/agalaxyclient/api/dddNotification.py send -a ".$$decoded{'attackId'});
-        };
-
-        if ($@) {
-          print {$fh} localtime() . " ERROR: Zone " .$zone_name. " notification wasn't sent. ".$@."\n";
-        }
+        system("/data/components/agalaxyclient/api/dddNotification.py send -a ".$$decoded{'attackId'});
       }
       # now we need to create incidents for all detected services
       #
       #
       foreach my $port (@tcp_ports) {
         if ($port == 80) {
-          if (createIncident($zone_name, "80+http")) {
-            # in case of failure create general incident for TCP
-            createIncident($zone_name, "other+tcp");
-          }
+          createIncident($zone_name, "80+http");
         } elsif ($port == 53) {
-          if (createIncident($zone_name, "53+dns-tcp")) {
-            # in case of failure create general incident for TCP
-            createIncident($zone_name, "other+tcp");
-          }
+          createIncident($zone_name, "53+dns-tcp");
         } elsif ($port == 443) {
-          if (createIncident($zone_name, "443+ssl-l4")) {
-            # in case of failure create general incident for TCP
-            createIncident($zone_name, "other+tcp");
-          }
+          createIncident($zone_name, "443+ssl-l4");
         } elsif ($port == 0) {
           createIncident($zone_name, "other+tcp");
         } elsif (createIncident($zone_name, $port."+tcp")) {
@@ -612,10 +600,7 @@ sub createZone {
       }
       foreach my $port (@udp_ports) {
         if ($port == 53) {
-          if (createIncident($zone_name, "53+dns-udp")) {
-            # in case of failure create general incident for TCP
-            createIncident($zone_name, "other+tcp");
-          }
+          createIncident($zone_name, "53+dns-udp");
         } elsif ($port == 0) {
           createIncident($zone_name, "other+udp");
         } elsif (createIncident($zone_name, $port."+udp")) {
@@ -640,11 +625,6 @@ sub createZone {
       if (get_noc_send()) {
         $message .= "Zone creation failed. Error: ".$$json_hash_ref{'message'};
         system("/usr/bin/php /var/www/shtml/index.php Cli:SendEmail -to=".get_noc()." -body=\"`echo -e '".$message."'`\" -subject='".$subject."'");
-
-        if ($? == 1 )
-        {
-          print {$fh} localtime() . " ERROR: Zone " .$zone_name. " notification wasn't sent.\n";
-        }
       }
 
       if ($debug) {
@@ -819,8 +799,6 @@ sub createZone {
 		 "force_push" => "true"
                 );
 
-      print {$fh} localtime() . " DEBUG: Zone " .$zone_name. " created, the IP has these values.\n".dump($zone{"ip_list"})."\n";
-
     if ($client->responseCode() eq '200') {
       my $device_list = decode_json($client->responseContent());
       $zone{'device_group'} = $$device_list{'device_group_list'}[0]{'id'};
@@ -846,24 +824,13 @@ sub createZone {
       if (get_noc_send()) {
         $message .= "Zone creation failed. Error: ".$$json_hash_ref{'message'};
         system("/usr/bin/php /var/www/shtml/index.php Cli:SendEmail -to=".get_noc()." -body=\"`echo -e '".$message."'`\" -subject='".$subject."'");
-
-        if ($? == -1 )
-        {
-          print {$fh} localtime() . " ERROR: Zone " .$zone_name. " notification wasn't sent.\n";
-        }
       }
     }
     elsif ($client->responseCode() eq '201') {
       print {$fh} localtime() . " INFO: Zone $zone_name created successfully.\n";
       # now we need to create incidents for all detected services
       if (get_notification()) {
-        eval {
-          run("/data/components/agalaxyclient/api/dddNotification.py send -a ".$$decoded{'attackId'});
-        };
-
-        if ($@) {
-          print {$fh} localtime() . " ERROR: Zone " .$zone_name. " notification wasn't sent. ".$@."\n";
-        }
+        system("/data/components/agalaxyclient/api/dddNotification.py send -a ".$$decoded{'attackId'});
       }
       foreach my $port (@tcp_ports) {
         if (createIncident($zone_name, $port."+tcp")) {
@@ -902,7 +869,13 @@ sub modifyZone {
   my @udp_ports;
   my %tcp_hash;
   my %udp_hash;
-
+  
+  my $sig_len = length($$decoded{'attacksignature'});
+  if ($sig_len eq 0) {
+    # Signature is empty
+    print {$fh} localtime() . " INFO: Zone " .$zone_name. " not created, the signature is empty.\n";
+    return 0;
+  }
   # parse through the attack signature to find ports and protocol used for attack
   my @signature_piceses = split( / OR /, $$decoded{'attacksignature'} );
   foreach my $rule (@signature_piceses) {
